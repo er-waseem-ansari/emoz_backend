@@ -314,38 +314,53 @@ class AuthService:
     ) -> TokenResponse:
         """Helper method to generate access + refresh tokens"""
 
-        # Token payload
-        token_data = {
-            "sub": str(user.id),
-            "phone": user.phone.value,
-            "country_code": user.country_code.value
-        }
+        try:
+            # Token payload
+            token_data = {
+                "sub": str(user.id),
+                "phone": user.phone,
+                "country_code": user.country_code
+            }
 
-        # Generate tokens
-        access_token = create_access_token(token_data)
-        refresh_token = create_refresh_token(token_data)
+            # Generate tokens
+            access_token = create_access_token(token_data)
+            refresh_token = create_refresh_token(token_data)
 
-        # Store refresh token in DB
-        expires_at = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+            # Store refresh token in DB
+            expires_at = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
-        db_refresh_token = RefreshToken(
-            user_id=user.id,
-            refresh_token=refresh_token,
-            expires_at=expires_at,
-            is_revoked=False
-        )
+            db_refresh_token = RefreshToken(
+                user_id=user.id,
+                refresh_token=refresh_token,
+                expires_at=expires_at,
+                is_revoked=False
+            )
 
-        db.add(db_refresh_token)
-        db.commit()
+            db.add(db_refresh_token)
+            db.commit()
 
-        response = TokenResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            token_type="bearer",
-            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        )
+            response = TokenResponse(
+                access_token=access_token,
+                refresh_token=refresh_token,
+                token_type="bearer",
+                expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+            )
 
-        return response
+            return response
+        except SQLAlchemyError as e:
+            db.rollback()
+            LOGGER.error(f"Database error while storing refresh token: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to store authentication token. Please try again."
+            )
+        except Exception as e:
+            db.rollback()
+            LOGGER.error(f"Unexpected error while generating token response: {str(e)}", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to generate authentication token. Please try again."
+            )
 
     @staticmethod
     async def refresh_access_token(
@@ -407,8 +422,8 @@ class AuthService:
             # Generate new access token
             access_token = create_access_token({
                 "sub": str(user.id),
-                "phone": user.phone.value,
-                "country_code": user.country_code.value
+                "phone": user.phone,
+                "country_code": user.country_code
             })
 
             response = TokenResponse(

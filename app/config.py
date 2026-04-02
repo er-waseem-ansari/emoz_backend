@@ -19,13 +19,6 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
-    # Firebase
-    FIREBASE_CREDENTIALS_PATH: str
-
-    # Google OAuth
-    GOOGLE_CLIENT_ID: str
-    GOOGLE_CLIENT_SECRET: str
-
     # Fast2SMS
     FAST2SMS_API_KEY: str
     FAST2SMS_URL: str = "https://www.fast2sms.com/dev/bulkV2"  # Default value
