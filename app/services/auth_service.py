@@ -224,9 +224,29 @@ class AuthService:
                 )
 
             if existing_user:
-                # User exists - use existing account
+                # User exists - update device info, last login, and revoke old tokens
                 user = existing_user
 
+                try:
+                    # Revoke all existing refresh tokens for this user
+                    db.query(RefreshToken).filter(
+                        RefreshToken.user_id == user.id,
+                        RefreshToken.is_revoked == False
+                    ).update({"is_revoked": True}, synchronize_session=False)
+
+                    # Update device info and last login timestamp
+                    user.device_info = device_info
+                    user.last_login = datetime.now(timezone.utc)
+                    db.commit()
+                    db.refresh(user)
+
+                except SQLAlchemyError as e:
+                    db.rollback()
+                    LOGGER.error(f"Database error while updating existing user on login: {str(e)}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Database error. Please try again."
+                    )
 
                 LOGGER.info(f"Existing user logged in: {phone_number} (User ID: {user.id})")
             else:
@@ -266,7 +286,7 @@ class AuthService:
 
             # Step 7: Generate and return tokens
             try:
-                return AuthService._generate_token_response(db, user, device_info)
+                return AuthService._generate_token_response(db, user)
             except Exception as e:
                 LOGGER.error(f"Failed to generate tokens for user {user.id}: {str(e)}")
                 raise HTTPException(
@@ -291,7 +311,6 @@ class AuthService:
     def _generate_token_response(
             db: Session,
             user: User,
-            device_info: Optional[str] = None
     ) -> TokenResponse:
         """Helper method to generate access + refresh tokens"""
 
@@ -299,6 +318,7 @@ class AuthService:
         token_data = {
             "sub": str(user.id),
             "phone": user.phone.value,
+            "country_code": user.country_code.value
         }
 
         # Generate tokens
@@ -312,7 +332,6 @@ class AuthService:
             user_id=user.id,
             refresh_token=refresh_token,
             expires_at=expires_at,
-            device_info=device_info,
             is_revoked=False
         )
 
@@ -389,6 +408,7 @@ class AuthService:
             access_token = create_access_token({
                 "sub": str(user.id),
                 "phone": user.phone.value,
+                "country_code": user.country_code.value
             })
 
             response = TokenResponse(
