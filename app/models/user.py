@@ -8,8 +8,8 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(255), nullable=True)
     email = Column(String(255), unique=True, index=True, nullable=True)
-    phone = Column(String(20), unique=True, index=True, nullable=True)
-    country_code = Column(String(5), nullable=True)  # New field for country code (e.g., +91)
+    phone = Column(String(20), unique=True, index=True, nullable=True)  # Full E.164, e.g. "+919876543210"
+    country_iso = Column(String(2), index=True, nullable=True)  # ISO 3166-1 alpha-2, e.g. "IN"
     password_hash = Column(String(255), nullable=True)  # Null for OAuth users
     profile_picture_url = Column(String(500), nullable=True)  # New field for profile picture URL
     device_info = Column(String(255), nullable=True)  # New field for device information (e.g., "Flutter App v1.0 on Android 11")

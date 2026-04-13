@@ -2,7 +2,10 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.v1 import auth
+from app.api.v1 import auth, chat, contacts
 from app.config import get_settings
+from app.database import get_db
+from app.websockets.chat_ws import chat_websocket_handler
 
 settings = get_settings()
 app = FastAPI(
@@ -23,6 +26,8 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
+app.include_router(contacts.router, prefix=settings.API_V1_PREFIX)
+app.include_router(chat.router)
 
 # Health check endpoint
 @app.get("/")

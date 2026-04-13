@@ -9,3 +9,5 @@ passlib
 passlib[bcrypt]
 firebase-admin
 requests
+aioredis
+websockets

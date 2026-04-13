@@ -22,13 +22,12 @@ settings = get_settings()
 class AuthService:
 
     @staticmethod
-    async def generate_otp(db: Session, phone_number: str, country_code: str, device_info: str, request: Request) -> None:
+    async def generate_otp(db: Session, phone_number: str, country_iso: Optional[str], device_info: str, request: Request) -> None:
         """Generates and sends OTP to the given phone number"""
         try:
             # Step 1: Fetch ALL unverified, non-invalidated OTPs for this phone (SINGLE QUERY)
             existing_otps = db.query(OTPVerification).filter(
                 OTPVerification.phone_number == phone_number,
-                OTPVerification.country_code == country_code,
                 OTPVerification.is_verified == False,
                 OTPVerification.invalidated == False
             ).all()  # Get all records at once
@@ -73,7 +72,7 @@ class AuthService:
 
             new_otp = OTPVerification(
                 phone_number=phone_number,
-                country_code=country_code,
+                country_iso=country_iso,
                 otp_hash=otp_hash.decode('utf-8'),
                 expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
                 device_info=device_info,
@@ -100,7 +99,7 @@ class AuthService:
             #         detail="Failed to send OTP. Please try again."
             #     )
 
-            LOGGER.info(f"OTP sent successfully to {country_code+phone_number}")
+            LOGGER.info(f"OTP sent successfully to {phone_number}")
 
         except SQLAlchemyError as e:
             db.rollback()
@@ -124,13 +123,12 @@ class AuthService:
 
 
     @staticmethod
-    async def verify_otp(db: Session, phone_number: str, country_code: str, otp: str, device_info: str) -> TokenResponse:
+    async def verify_otp(db: Session, phone_number: str, otp: str, device_info: str) -> TokenResponse:
 
         try:
             # Step 1: Find the latest valid OTP record
             record = db.query(OTPVerification).filter(
                 OTPVerification.phone_number == phone_number,
-                OTPVerification.country_code == country_code,
                 OTPVerification.is_verified == False,
                 OTPVerification.invalidated == False,
                 OTPVerification.expires_at > datetime.now(timezone.utc)
@@ -213,8 +211,7 @@ class AuthService:
             # Step 6: Check if user already exists
             try:
                 existing_user = db.query(User).filter(
-                    User.phone == phone_number,
-                    User.country_code == country_code
+                    User.phone == phone_number
                 ).first()
             except SQLAlchemyError as e:
                 LOGGER.error(f"Database error while fetching user: {str(e)}")
@@ -254,8 +251,7 @@ class AuthService:
                 try:
                     user = User(
                         phone=phone_number,
-                        country_code=country_code,
-                        device_info = device_info
+                        device_info=device_info
                     )
                     db.add(user)
                     db.commit()
@@ -267,7 +263,7 @@ class AuthService:
                     LOGGER.error(f"Integrity error while creating user: {str(e)}")
                     # Possible race condition - user was created between check and insert
                     # Try to fetch again
-                    existing_user = db.query(User).filter(User.phone == phone_number, User.country_code == country_code).first()
+                    existing_user = db.query(User).filter(User.phone == phone_number).first()
                     if existing_user:
                         user = existing_user
                         LOGGER.info(f"User found after race condition: {phone_number}")
@@ -319,7 +315,6 @@ class AuthService:
             token_data = {
                 "sub": str(user.id),
                 "phone": user.phone,
-                "country_code": user.country_code
             }
 
             # Generate tokens
@@ -423,7 +418,6 @@ class AuthService:
             access_token = create_access_token({
                 "sub": str(user.id),
                 "phone": user.phone,
-                "country_code": user.country_code
             })
 
             response = TokenResponse(

@@ -9,9 +9,9 @@ class OTPVerification(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
 
     # Core OTP Fields
-    phone_number = Column(String(15), nullable=False, index=True)  # E.164 format: +919876543210
-    country_code = Column(String(5), nullable=False)  # Store country code separately for easier querying
-    otp_hash = Column(String(255), nullable=False)  # Hashed OTP (never store plain text in production)
+    phone_number = Column(String(20), nullable=False, index=True)  # Full E.164: +919876543210
+    country_iso = Column(String(2), nullable=True, index=True)    # ISO 3166-1 alpha-2: "IN" — for rate-limiting & fraud detection
+    otp_hash = Column(String(255), nullable=False)                 # Hashed OTP (never store plain text in production)
 
     # Status & Attempts
     is_verified = Column(Boolean, default=False, nullable=False)
