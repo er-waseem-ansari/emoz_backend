@@ -1,11 +1,19 @@
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
-from app.api.v1 import auth
-from app.api.v1 import auth, chat, contacts
+from app.api.v1 import auth, chat, contacts, users
 from app.config import get_settings
-from app.database import get_db
-from app.websockets.chat_ws import chat_websocket_handler
+from app.database import Base, engine
+
+# Import all models so Base knows about every table before create_all
+import app.models.user          # noqa: F401
+import app.models.otp           # noqa: F401
+import app.models.token         # noqa: F401
+import app.models.conversation  # noqa: F401
+import app.models.message       # noqa: F401
+
+# Create all tables that don't exist yet (safe to call on every startup)
+Base.metadata.create_all(bind=engine)
 
 settings = get_settings()
 app = FastAPI(
@@ -27,7 +35,8 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
 app.include_router(contacts.router, prefix=settings.API_V1_PREFIX)
-app.include_router(chat.router)
+app.include_router(chat.router, prefix=settings.API_V1_PREFIX)
+app.include_router(users.router, prefix=settings.API_V1_PREFIX)
 
 # Health check endpoint
 @app.get("/")

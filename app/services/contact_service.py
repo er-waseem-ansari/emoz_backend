@@ -6,45 +6,65 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.user import User
+from app.schemas.contacts import RegisteredContact, normalize_phone
 
 LOGGER = logging.getLogger(__name__)
 
 
 class ContactService:
     @staticmethod
-    async def check_contacts(phone_numbers: List[str], db: Session) -> List[str]:
+    async def check_contacts(
+        phone_numbers: List[str], db: Session
+    ) -> List[RegisteredContact]:
         """
-        Returns the subset of the given E.164 phone numbers that belong to
-        active, registered users.
+        Accepts a list of phone numbers (already validated, in original client format).
 
-        Validation (format, batch size) is enforced at the schema layer before
-        this method is reached. The query uses a parameterised IN clause via
-        SQLAlchemy — no raw SQL, no injection risk.
-        Only users with is_active=True are matched.
+        - Normalizes each number (strip spaces/dashes/parens) for the DB lookup.
+        - Queries the users table in a single IN clause — no N+1 queries.
+        - Returns RegisteredContact objects with phoneNumber in the same format
+          as received from the client and the corresponding userId.
+        - Deduplicates by normalized form to avoid redundant DB work.
         """
         try:
-            # Deduplicate to avoid redundant DB work while preserving first-seen order
-            unique_numbers: List[str] = list(dict.fromkeys(phone_numbers))
+            # Build normalized → original mapping (first occurrence wins on duplicates)
+            normalized_to_original: dict[str, str] = {}
+            for original in phone_numbers:
+                normalized = normalize_phone(original)
+                if normalized not in normalized_to_original:
+                    normalized_to_original[normalized] = original
 
+            if not normalized_to_original:
+                return []
+
+            # Single batch query — fetch phone + id for all matching active users
             rows = (
-                db.query(User.phone)
+                db.query(User.phone, User.id)
                 .filter(
-                    User.phone.in_(unique_numbers),
+                    User.phone.in_(list(normalized_to_original.keys())),
                     User.is_active.is_(True),
                 )
                 .all()
             )
 
-            registered = [row.phone for row in rows]
+            # Map each DB-normalized number back to the original client format
+            result = [
+                RegisteredContact(
+                    phone_number=normalized_to_original.get(row.phone, row.phone),
+                    user_id=row.id,
+                )
+                for row in rows
+            ]
+
             LOGGER.info(
-                f"check_contacts: queried {len(unique_numbers)} numbers, "
-                f"found {len(registered)} registered"
+                "check_contacts: queried %d numbers, found %d registered",
+                len(normalized_to_original),
+                len(result),
             )
-            return registered
+            return result
 
         except SQLAlchemyError as e:
             db.rollback()
-            LOGGER.error(f"Database error in check_contacts: {str(e)}")
+            LOGGER.error("Database error in check_contacts: %s", e)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database error. Please try again.",
@@ -54,7 +74,7 @@ class ContactService:
             raise
 
         except Exception as e:
-            LOGGER.error(f"Unexpected error in check_contacts: {str(e)}", exc_info=True)
+            LOGGER.error("Unexpected error in check_contacts: %s", e, exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An unexpected error occurred. Please try again.",

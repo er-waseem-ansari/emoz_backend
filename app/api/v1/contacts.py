@@ -3,13 +3,14 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.routing import AliasRoute
 from app.database import get_db
 from app.schemas.contacts import CheckContactRequest, CheckContactResponse
 from app.services.contact_service import ContactService
 
 LOGGER = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/contacts", tags=["Contacts"])
+router = APIRouter(prefix="/contacts", tags=["Contacts"], route_class=AliasRoute)
 
 
 @router.post("/check", response_model=CheckContactResponse, status_code=status.HTTP_200_OK)
@@ -29,7 +30,7 @@ async def check_contacts(
         registered = await ContactService.check_contacts(
             check_contact_request.phone_numbers, db
         )
-        return CheckContactResponse(phone_numbers=registered)
+        return CheckContactResponse(registered_numbers=registered)
 
     except HTTPException:
         raise

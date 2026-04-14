@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, Request
 from fastapi import status
 from sqlalchemy.orm import Session
 
+from app.core.routing import AliasRoute
 from app.database import get_db
 from app.schemas.auth import TokenResponse, VerifyOTPRequest, TokenRefreshRequest, GenerateOTPRequest
 from app.services.auth_service import AuthService
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+router = APIRouter(prefix="/auth", tags=["Authentication"], route_class=AliasRoute)
 
 
 @router.post("/phone/generate-otp", status_code=status.HTTP_200_OK)

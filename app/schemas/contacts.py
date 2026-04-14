@@ -1,13 +1,14 @@
-from pydantic import BaseModel, Field, field_validator
-from typing import List
 import re
+from typing import List
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _E164_RE = re.compile(r"^\+[1-9]\d{7,14}$")
 _FORMATTING_CHARS = re.compile(r"[\s\-\(\)\.]")
 MAX_BATCH_SIZE = 500
 
 
-def _normalize(number: str) -> str:
+def normalize_phone(number: str) -> str:
     """Strip common formatting characters (spaces, dashes, parentheses, dots)."""
     return _FORMATTING_CHARS.sub("", number.strip())
 
@@ -19,24 +20,33 @@ class CheckContactRequest(BaseModel):
     @classmethod
     def validate_phone_numbers(cls, numbers: List[str]) -> List[str]:
         if len(numbers) > MAX_BATCH_SIZE:
-            raise ValueError(f"Exceeds maximum of {MAX_BATCH_SIZE} numbers per request")
+            raise ValueError(f"Exceeds maximum of {MAX_BATCH_SIZE} numbers per request.")
 
-        normalized = []
         for raw in numbers:
-            clean = _normalize(raw)
+            clean = normalize_phone(raw)
             if not _E164_RE.match(clean):
                 raise ValueError(
                     f"'{raw}' cannot be normalised to E.164 format. "
                     "Numbers must include a country prefix (e.g. +919876543210)."
                 )
-            normalized.append(clean)
 
-        return normalized
+        # Return originals — normalization happens in the service so the
+        # original format can be echoed back in the response.
+        return numbers
 
-    model_config = {"populate_by_name": True}
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class RegisteredContact(BaseModel):
+    phone_number: str = Field(alias="phoneNumber")
+    user_id: int      = Field(alias="userId")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class CheckContactResponse(BaseModel):
-    phone_numbers: List[str] = Field(..., alias="registeredNumbers")
+    registered_numbers: List[RegisteredContact] = Field(
+        default_factory=list, alias="registeredNumbers"
+    )
 
-    model_config = {"populate_by_name": True}
+    model_config = ConfigDict(populate_by_name=True)

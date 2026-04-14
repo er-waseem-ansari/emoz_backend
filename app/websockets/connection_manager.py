@@ -1,68 +1,71 @@
+import logging
+from typing import Dict, List
+
 from fastapi import WebSocket
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ConnectionManager:
     """
-    Keeps track of all active WebSocket connections.
+    Tracks all active WebSocket connections in memory, keyed by user_id.
 
-    Think of this like a dictionary:
-        session_id → [list of connected users in that chat]
-        user_id    → their WebSocket connection
+    One user may have multiple connections (multiple devices/tabs). All
+    conversation events are routed by user_id — there is no per-conversation
+    room concept at the network layer.
+
+    ⚠ Scale note: this is a single-process, in-memory store. For multi-server
+    deployments (e.g. behind a load balancer) replace send_to_user with a
+    Redis Pub/Sub fan-out while keeping this interface identical.
     """
 
     def __init__(self):
-        # session_id → list of WebSocket connections
-        self.active_connections: dict[str, list[WebSocket]] = {}
+        # user_id → list of active WebSocket connections (one per device/tab)
+        self.user_connections: Dict[int, List[WebSocket]] = {}
 
-        # user_id → WebSocket (so we can send directly to a user)
-        self.user_connections: dict[str, WebSocket] = {}
+    # ── Connection lifecycle ───────────────────────────────────────────────────
 
-    async def connect(
-            self,
-            websocket: WebSocket,
-            session_id: str,
-            user_id: str
-    ):
-        """Accept connection and register it."""
-        await websocket.accept()
+    def connect(self, websocket: WebSocket, user_id: int) -> None:
+        """Register a new authenticated connection for a user."""
+        self.user_connections.setdefault(user_id, []).append(websocket)
+        count = len(self.user_connections[user_id])
+        LOGGER.info(f"[WS] User {user_id} connected ({count} active connection(s))")
 
-        # add to session room
-        if session_id not in self.active_connections:
-            self.active_connections[session_id] = []
-        self.active_connections[session_id].append(websocket)
+    def disconnect(self, websocket: WebSocket, user_id: int) -> None:
+        """Remove a specific WebSocket from the user's connection list."""
+        connections = self.user_connections.get(user_id, [])
+        if websocket in connections:
+            connections.remove(websocket)
+        if not connections:
+            self.user_connections.pop(user_id, None)
+        LOGGER.info(f"[WS] User {user_id} disconnected")
 
-        # map user_id → websocket
-        self.user_connections[user_id] = websocket
+    # ── Sending ────────────────────────────────────────────────────────────────
 
-        print(f"[WS] User {user_id} connected to session {session_id}")
+    async def send_to_user(self, user_id: int, data: dict) -> None:
+        """
+        Send a JSON payload to all active connections of a user.
+        Dead connections are silently removed.
+        """
+        connections = self.user_connections.get(user_id, [])
+        dead: List[WebSocket] = []
 
-    def disconnect(
-            self,
-            websocket: WebSocket,
-            session_id: str,
-            user_id: str
-    ):
-        """Remove connection on disconnect."""
-        if session_id in self.active_connections:
-            self.active_connections[session_id].remove(websocket)
-            if not self.active_connections[session_id]:
-                del self.active_connections[session_id]
+        for ws in connections:
+            try:
+                await ws.send_json(data)
+            except Exception:
+                dead.append(ws)
 
-        if user_id in self.user_connections:
-            del self.user_connections[user_id]
+        for ws in dead:
+            connections.remove(ws)
+        if not connections:
+            self.user_connections.pop(user_id, None)
 
-        print(f"[WS] User {user_id} disconnected from session {session_id}")
+    # ── Presence ───────────────────────────────────────────────────────────────
 
-    async def send_to_user(self, user_id: str, data: dict):
-        """Send a message to a specific user if they are online."""
-        websocket = self.user_connections.get(user_id)
-        if websocket:
-            await websocket.send_json(data)
-
-    def is_user_online(self, user_id: str) -> bool:
-        """Check if a user currently has an active connection."""
-        return user_id in self.user_connections
+    def is_user_online(self, user_id: int) -> bool:
+        return bool(self.user_connections.get(user_id))
 
 
-# Single shared instance used across the entire app
+# Single shared instance used across the entire app process
 manager = ConnectionManager()
